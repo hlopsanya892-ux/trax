@@ -1,0 +1,48 @@
+name: Play Store Monitor
+
+on:
+  schedule:
+    # запуск кожні 5 хвилин (мінімальний інтервал у GitHub Actions)
+    - cron: "*/5 * * * *"
+  workflow_dispatch:  # дозволяє запустити вручну кнопкою в UI
+
+# потрібно, щоб бот міг комітити оновлений state.json назад у репозиторій
+permissions:
+  contents: write
+
+# щоб два запуски не накладались один на одного
+concurrency:
+  group: play-store-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python check.py
+
+      - name: Commit state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet state.json; then
+            git add state.json
+            git commit -m "update state [skip ci]"
+            git push
+          else
+            echo "no state changes"
+          fi
