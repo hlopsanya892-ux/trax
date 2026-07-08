@@ -75,13 +75,13 @@ def tg_send(chat_id, text):
         print(f"send error: {e}", file=sys.stderr)
 
 
-def tg_get_updates(offset):
-    """Забираємо нові повідомлення від користувачів."""
+def tg_get_updates(offset, timeout=0):
+    """Забираємо нові повідомлення. timeout>0 = long polling (чекаємо повідомлення)."""
     try:
         r = requests.get(
             f"{API}/getUpdates",
-            params={"offset": offset, "timeout": 0, "allowed_updates": '["message"]'},
-            timeout=40,
+            params={"offset": offset, "timeout": timeout, "allowed_updates": '["message"]'},
+            timeout=timeout + 15,
         )
         r.raise_for_status()
         return r.json().get("result", [])
@@ -124,8 +124,7 @@ HELP_TEXT = (
 )
 
 
-def handle_updates(state):
-    updates = tg_get_updates(state["offset"])
+def process_updates(updates, state):
     for upd in updates:
         state["offset"] = upd["update_id"] + 1
         msg = upd.get("message")
@@ -196,10 +195,27 @@ def monitor(state):
         time.sleep(1)  # трохи паузи між запитами до Google
 
 
+def listen(state, seconds):
+    """~`seconds` секунд активно слухаємо повідомлення й миттєво відповідаємо."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        remaining = int(deadline - time.time())
+        poll = max(1, min(25, remaining))  # long polling до 25 с
+        updates = tg_get_updates(state["offset"], timeout=poll)
+        if updates:
+            process_updates(updates, state)
+            save_state(state)  # одразу зберігаємо, щоб не загубити offset
+
+
 def main():
+    # скільки секунд слухати за один запуск (за замовч. 270 = 4.5 хв,
+    # щоб вписатися в 5-хвилинний цикл перезапуску)
+    listen_seconds = int(os.environ.get("LISTEN_SECONDS", "270"))
+
     state = load_state()
-    handle_updates(state)
-    monitor(state)
+    monitor(state)            # перевіряємо статуси додатків
+    save_state(state)
+    listen(state, listen_seconds)  # далі слухаємо команди в реальному часі
     save_state(state)
 
 

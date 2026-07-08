@@ -2,15 +2,14 @@ name: Play Store Monitor
 
 on:
   schedule:
-    # запуск кожні 5 хвилин (мінімальний інтервал у GitHub Actions)
+    # запасний "будильник" — якщо ланцюжок самозапуску колись обірветься
     - cron: "*/5 * * * *"
-  workflow_dispatch:  # дозволяє запустити вручну кнопкою в UI
+  workflow_dispatch:
 
-# потрібно, щоб бот міг комітити оновлений state.json назад у репозиторій
 permissions:
   contents: write
 
-# щоб два запуски не накладались один на одного
+# щоб запуски не накладались: наступний чекає, поки завершиться поточний
 concurrency:
   group: play-store-monitor
   cancel-in-progress: false
@@ -18,9 +17,23 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 8  # страховка від зависання, звільняє чергу для наступного запуску
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Тригеримо наступний запуск ОДРАЗУ на початку — так ланцюжок живе,
+      # навіть якщо поточний запуск раптом впаде. Наступний стоятиме в черзі
+      # (concurrency) і стартує, щойно завершиться цей.
+      - name: Trigger next run
+        env:
+          PAT: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token $PAT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/monitor.yml/dispatches" \
+            -d '{"ref":"main"}' || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -30,15 +43,18 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Run bot
+      - name: Run bot (listens ~4.5 min)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          LISTEN_SECONDS: "270"
         run: python check.py
 
       - name: Commit state
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash || true
           if ! git diff --quiet state.json; then
             git add state.json
             git commit -m "update state [skip ci]"
