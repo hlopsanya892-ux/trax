@@ -1,4 +1,9 @@
 {
-  "apps": {},
-  "offset": 0
+  "apps": {
+    "com.omnislashs.quki.d": {
+      "chat_id": 7714482950,
+      "status": "unavailable"
+    }
+  },
+  "offset": 751391531
 }
